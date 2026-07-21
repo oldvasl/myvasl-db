@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "530711195258",
+    "project_id": "dehat-361ef",
+    "storage_bucket": "dehat-361ef.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:530711195258:android:1334c22397a0c6f74fd5c3",
+        "android_client_info": {
+          "package_name": "ir.dehaat.kiosk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDw8YeBQu23GgoB8hYO4ymWuC25nm15acQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

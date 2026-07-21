@@ -1,11 +1,14 @@
 package ir.dehaat.kiosk
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
@@ -15,16 +18,19 @@ import android.webkit.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.firebase.messaging.FirebaseMessaging
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
 // آدرس سایت دهات - این رو با دامنه واقعی خودت عوض کن
-private const val SITE_URL = "https://dehaat.aghey.workers.dev"
-private const val SITE_HOST = "dehaat.aghey.workers.dev"
+private const val SITE_URL = "https://YOUR-SITE-URL.example"
+private const val SITE_HOST = "YOUR-SITE-URL.example"
 
 class MainActivity : AppCompatActivity() {
 
@@ -33,6 +39,13 @@ class MainActivity : AppCompatActivity() {
     // برای آپلود فایل (input type=file توی سایت)
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var cameraImageUri: Uri? = null
+
+    // برای پوش نوتیفیکیشن
+    private var pendingFcmToken: String? = null
+    private var pendingOpenUrl: String? = null
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* نتیجه لازم نیست هندل بشه */ }
 
     private val fileChooserLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -72,6 +85,9 @@ class MainActivity : AppCompatActivity() {
         setupWebView()
         webView.loadUrl(SITE_URL)
 
+        setupPushNotifications()
+        handleNotificationIntent(intent)
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (webView.canGoBack()) {
@@ -82,6 +98,60 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    // وقتی کاربر روی نوتیف می‌زنه، اگه لینک خاصی همراهش اومده باشه همون رو باز می‌کنیم
+    private fun handleNotificationIntent(intent: Intent?) {
+        val url = intent?.getStringExtra("open_url")
+        if (!url.isNullOrEmpty()) {
+            if (::webView.isInitialized) {
+                webView.loadUrl(url)
+            } else {
+                pendingOpenUrl = url
+            }
+        }
+    }
+
+    private fun setupPushNotifications() {
+        // پرمیشن نمایش نوتیف (فقط اندروید ۱۳ به بالا لازمه)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        // هر وقت توکن FCM آماده/تازه شد، سعی کن به صفحه‌ی وب پاسش بدی
+        FcmTokenHolder.setListener { token ->
+            pendingFcmToken = token
+            trySendTokenToWebPage()
+        }
+
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                task.result?.let { FcmTokenHolder.updateToken(it) }
+            } else {
+                Log.w("DehaatKiosk", "fcm token fetch failed", task.exception)
+            }
+        }
+    }
+
+    // توکن رو با صدا زدن window.onFcmToken(token) توی صفحه‌ی خودت پاس می‌دیم.
+    // خود سایت (که از قبل لاگین/سشن معتبر داره) باید این تابع رو تعریف کنه و توکن
+    // رو با fetch به بک‌اند خودش بفرسته تا ذخیره بشه.
+    private fun trySendTokenToWebPage() {
+        val token = pendingFcmToken ?: return
+        if (!::webView.isInitialized) return
+        val js = "if (window.onFcmToken) { window.onFcmToken(${JSONObject.quote(token)}); }"
+        webView.evaluateJavascript(js, null)
     }
 
     private fun hideSystemBars() {
@@ -133,6 +203,11 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 injectBlobDownloadScript()
+                trySendTokenToWebPage()
+                pendingOpenUrl?.let {
+                    webView.loadUrl(it)
+                    pendingOpenUrl = null
+                }
             }
         }
 
@@ -212,39 +287,63 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // اسکریپتی که کلیک روی لینک‌های دانلود بلاب رو می‌گیره و از طریق بریج به کاتلین می‌فرسته
+    // اسکریپتی که دانلودهای blob رو (چه با <a download> چه window.open) می‌گیره و از طریق بریج به کاتلین می‌فرسته
     private fun injectBlobDownloadScript() {
         val js = """
             (function() {
                 if (window.__dehaatDownloadHooked) return;
                 window.__dehaatDownloadHooked = true;
 
+                function guessExtension(mime) {
+                    var map = {
+                        'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
+                        'image/gif': 'gif', 'application/pdf': 'pdf', 'video/mp4': 'mp4',
+                        'audio/mpeg': 'mp3', 'application/zip': 'zip', 'text/plain': 'txt',
+                        'application/json': 'json'
+                    };
+                    return map[mime] || 'bin';
+                }
+
                 function blobToBase64(blobUrl, fileName) {
                     fetch(blobUrl).then(function(res) { return res.blob(); }).then(function(blob) {
+                        var name = fileName;
+                        if (!name) name = 'file.' + guessExtension(blob.type);
                         var reader = new FileReader();
                         reader.onloadend = function() {
                             var base64 = reader.result.split(',')[1];
-                            AndroidDownloader.saveBase64File(base64, fileName, blob.type || 'application/octet-stream');
+                            AndroidDownloader.saveBase64File(base64, name, blob.type || 'application/octet-stream');
                         };
                         reader.readAsDataURL(blob);
                     });
                 }
 
+                // حالت ۱: کلیک روی <a> با href بلاب (چه attribute دانلود داشته باشه چه نه)
                 document.addEventListener('click', function(e) {
                     var el = e.target;
                     while (el && el.tagName !== 'A') { el = el.parentElement; }
-                    if (el && el.hasAttribute('download') && el.href && el.href.indexOf('blob:') === 0) {
+                    if (el && el.href && el.href.indexOf('blob:') === 0) {
                         e.preventDefault();
-                        var name = el.getAttribute('download') || 'file';
+                        var name = el.getAttribute('download') || '';
                         blobToBase64(el.href, name);
                     }
                 }, true);
+
+                // حالت ۲: window.open(blobUrl) یا window.open(blobUrl, '_blank')
+                var originalOpen = window.open;
+                window.open = function(url, target, features) {
+                    if (typeof url === 'string' && url.indexOf('blob:') === 0) {
+                        blobToBase64(url, '');
+                        return null;
+                    }
+                    return originalOpen.call(window, url, target, features);
+                };
             })();
         """.trimIndent()
         webView.evaluateJavascript(js, null)
     }
 
     override fun onDestroy() {
+        FcmTokenHolder.clearListener()
         webView.destroy()
         super.onDestroy()
     }
