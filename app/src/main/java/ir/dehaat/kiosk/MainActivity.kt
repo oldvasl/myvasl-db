@@ -23,8 +23,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 // آدرس سایت دهات - این رو با دامنه واقعی خودت عوض کن
-private const val SITE_URL = "https://YOUR-SITE-URL.example"
-private const val SITE_HOST = "YOUR-SITE-URL.example"
+private const val SITE_URL = "https://dehaat.aghey.workers.dev"
+private const val SITE_HOST = "dehaat.aghey.workers.dev"
 
 class MainActivity : AppCompatActivity() {
 
