@@ -1,0 +1,73 @@
+name: Replace Repo From Zip
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'DehaatKiosk.zip'
+
+permissions:
+  contents: write
+
+jobs:
+  replace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make sure zip exists
+        run: |
+          if [ ! -f "DehaatKiosk.zip" ]; then
+            echo "DehaatKiosk.zip پیدا نشد توی ریشه‌ی مخزن. اول آپلودش کن."
+            exit 1
+          fi
+
+      - name: Extract zip
+        run: |
+          rm -rf _extracted
+          mkdir _extracted
+          unzip -o DehaatKiosk.zip -d _extracted
+
+          # اگه زیپ یه پوشه‌ی تک بالاسری داره (مثل DehaatKiosk/...) بریم توش
+          TOP_ITEMS=$(find _extracted -mindepth 1 -maxdepth 1 | wc -l)
+          if [ "$TOP_ITEMS" -eq 1 ] && [ -d "$(find _extracted -mindepth 1 -maxdepth 1)" ]; then
+            SRC_DIR=$(find _extracted -mindepth 1 -maxdepth 1)
+          else
+            SRC_DIR="_extracted"
+          fi
+          echo "SRC_DIR=$SRC_DIR" >> $GITHUB_ENV
+
+      - name: Wipe repo content (به جز .git و خودِ این workflow)
+        run: |
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name '.git' \
+            ! -name '_extracted' \
+            -exec rm -rf {} +
+
+          # اگه زیپ خودش .github/workflows داره، فایل این workflow رو نگه دار تا حذف نشه
+          mkdir -p .github/workflows
+          cp "$SRC_DIR/../../.github/workflows/deploy-from-zip.yml" .github/workflows/deploy-from-zip.yml 2>/dev/null || true
+
+      - name: Copy new content in place
+        run: |
+          cp -r "$SRC_DIR"/. .
+          rm -rf _extracted
+
+      - name: Restore this workflow file if it got overwritten
+        run: |
+          git show HEAD:.github/workflows/deploy-from-zip.yml > .github/workflows/deploy-from-zip.yml 2>/dev/null || true
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "تغییری برای commit نبود."
+          else
+            git commit -m "Replace repo content from DehaatKiosk.zip"
+            git push
+          fi
