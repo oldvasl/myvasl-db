@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
 import android.webkit.*
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -22,8 +23,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 // آدرس سایت دهات - این رو با دامنه واقعی خودت عوض کن
-private const val SITE_URL = "https://dehaat.aghey.workers.dev"
-private const val SITE_HOST = "dehaat.aghey.workers.dev"
+private const val SITE_URL = "https://YOUR-SITE-URL.example"
+private const val SITE_HOST = "YOUR-SITE-URL.example"
 
 class MainActivity : AppCompatActivity() {
 
@@ -71,14 +72,16 @@ class MainActivity : AppCompatActivity() {
         setupWebView()
         webView.loadUrl(SITE_URL)
 
-        onBackPressedDispatcher.addCallback(this) {
-            if (webView.canGoBack()) {
-                webView.goBack()
-            } else {
-                isEnabled = false
-                onBackPressedDispatcher.onBackPressed()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
             }
-        }
+        })
     }
 
     private fun hideSystemBars() {
