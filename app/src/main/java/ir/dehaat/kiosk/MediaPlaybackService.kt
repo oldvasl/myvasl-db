@@ -51,6 +51,8 @@ class MediaPlaybackService : Service() {
     private var lastTitle = ""
     private var lastArtist = ""
     private var lastArtworkUrl = ""
+    // برای اینکه بفهمیم اولین نوتیف (لازم برای رعایت قاعده‌ی startForeground اندروید ۱۲+) پست شده یا نه
+    private var hasPostedInitialNotification = false
 
     override fun onCreate() {
         super.onCreate()
@@ -77,7 +79,7 @@ class MediaPlaybackService : Service() {
         // طبق قاعده‌ی اندروید ۱۲+، بعد از startForegroundService باید ظرف چند ثانیه startForeground
         // واقعی صدا زده بشه؛ برای اطمینان همون لحظه‌ی اول (حتی قبل از دانلود کاور/آماده شدن متادیتای کامل)
         // یه نوتیف اولیه می‌سازیم و بعداً با اطلاعات کامل‌تر آپدیتش می‌کنیم.
-        if (intent?.action == ACTION_UPDATE_METADATA || intent?.action == ACTION_UPDATE_PLAYBACK_STATE) {
+        if (intent?.action == ACTION_UPDATE_METADATA) {
             postNotification()
         }
         when (intent?.action) {
@@ -95,8 +97,12 @@ class MediaPlaybackService : Service() {
             }
             ACTION_UPDATE_PLAYBACK_STATE -> {
                 // وقتی فقط موقعیت/مدت‌زمان به‌روز می‌شه (position_only)، isPlaying فعلی دست‌نخورده می‌مونه
-                if (!intent.getBooleanExtra("position_only", false)) {
-                    isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false)
+                val positionOnly = intent.getBooleanExtra("position_only", false)
+                var playingChanged = false
+                if (!positionOnly) {
+                    val newIsPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false)
+                    playingChanged = newIsPlaying != isPlaying
+                    isPlaying = newIsPlaying
                 }
                 val duration = intent.getLongExtra(EXTRA_DURATION, 0)
                 val position = intent.getLongExtra(EXTRA_POSITION, 0)
@@ -109,10 +115,14 @@ class MediaPlaybackService : Service() {
                 // می‌شد موزیک هر چند ثانیه یک‌بار خودش استاپ بشه. این سرویس فقط نقش
                 // نوتیفیکیشن/ریموت‌کنترل رو داره، نباید صاحب audio focus باشه.
                 updatePlaybackState(duration, position)
-                postNotification()
-                if (!isPlaying) {
-                    // وقتی مکث شده، اگه اپ کامل بسته بشه سرویس هم می‌تونه بی‌سروصدا جمع بشه؛
-                    // ولی نوتیف رو نگه می‌داریم تا کاربر بتونه از همونجا دوباره پلی بزنه
+                // نوتیف کامل (با بیت‌مپ کاور، اکشن‌ها و MediaStyle) رو فقط وقتی از نو می‌سازیم که
+                // چیزی در ظاهرش واقعاً عوض شده باشه (اولین‌بار، یا پلی/پاز عوض شده). برای تیک‌های
+                // صرفاً موقعیتِ پخش (که وقتی موزیک پخش می‌شه چندبار در ثانیه از سایت میان) دیگه
+                // نوتیف رو دوباره نمی‌سازیم و پست نمی‌کنیم؛ موقعیت/مدت از طریق mediaSession همچنان
+                // برای اسکرابرِ صفحه‌ی قفل به‌روز می‌مونه. همین ساخت/پست تکراری و بی‌مورد نوتیف روی
+                // هر تیک بود که باعث لگ اپ می‌شد.
+                if (!hasPostedInitialNotification || playingChanged) {
+                    postNotification()
                 }
             }
             ACTION_STOP -> {
@@ -241,6 +251,7 @@ class MediaPlaybackService : Service() {
         // محدودیتِ ۵ثانیه‌ایِ اندروید ۱۲+ برای startForegroundService نقض نمی‌شه، هم کاربر همیشه
         // می‌تونه از همون نوتیف دوباره پلی بزنه. فقط با ACTION_STOP کامل جمع می‌شه.
         startForeground(NOTIFICATION_ID, notification)
+        hasPostedInitialNotification = true
     }
 
     override fun onDestroy() {

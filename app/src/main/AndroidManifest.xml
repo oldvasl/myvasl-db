@@ -18,7 +18,8 @@
     <application
         android:allowBackup="true"
         android:label="دهات"
-        android:icon="@android:drawable/sym_def_app_icon"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.DehaatKiosk"
         android:usesCleartextTraffic="false">
 
