@@ -31,8 +31,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 // آدرس سایت دهات - این رو با دامنه واقعی خودت عوض کن
-private const val SITE_URL = "https://dehaat.aghey.workers.dev"
-private const val SITE_HOST = "dehaat.aghey.workers.dev"
+private const val SITE_URL = "https://YOUR-SITE-URL.example"
+private const val SITE_HOST = "YOUR-SITE-URL.example"
 
 // پسوند فایل‌هایی که تقریباً همیشه یعنی «این یه دانلوده، نه لینک به یه اپ دیگه»؛
 // حتی اگه از یه هاست/CDN دیگه (غیر از SITE_HOST) سرو بشن، بازم باید داخل وب‌ویو دست‌کاری بشن

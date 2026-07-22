@@ -9,9 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -49,7 +46,6 @@ class MediaPlaybackService : Service() {
     }
 
     private lateinit var mediaSession: MediaSessionCompat
-    private var audioManager: AudioManager? = null
     private var currentArtwork: Bitmap? = null
     private var isPlaying = false
     private var lastTitle = ""
@@ -58,7 +54,6 @@ class MediaPlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         createNotificationChannel()
 
         mediaSession = MediaSessionCompat(this, "DehaatMediaSession").apply {
@@ -105,7 +100,14 @@ class MediaPlaybackService : Service() {
                 }
                 val duration = intent.getLongExtra(EXTRA_DURATION, 0)
                 val position = intent.getLongExtra(EXTRA_POSITION, 0)
-                if (isPlaying) requestAudioFocus() else abandonAudioFocus()
+                // نکته‌ی مهم: عمداً اینجا audio focus نمی‌گیریم. پخش واقعی صدا داخل خودِ
+                // WebView (المان audio/video سایت) اتفاق می‌افته و کرومیوم خودش از قبل
+                // audio focus رو نگه داشته. اگه این سرویس هم جداگانه (مخصوصاً هر بار که
+                // فقط موقعیت پخش آپدیت می‌شه، یعنی تقریباً هر ثانیه) درخواست GAIN بده،
+                // اندروید فوکوس رو از کرومیوم می‌گیره و AUDIOFOCUS_LOSS به کرومیوم می‌فرسته؛
+                // رفتار پیش‌فرض کرومیوم با از دست دادن فوکوس، پاز خودکار مدیاست. همین باعث
+                // می‌شد موزیک هر چند ثانیه یک‌بار خودش استاپ بشه. این سرویس فقط نقش
+                // نوتیفیکیشن/ریموت‌کنترل رو داره، نباید صاحب audio focus باشه.
                 updatePlaybackState(duration, position)
                 postNotification()
                 if (!isPlaying) {
@@ -171,27 +173,6 @@ class MediaPlaybackService : Service() {
                 .setState(state, position, 1.0f)
                 .build()
         )
-    }
-
-    private fun requestAudioFocus() {
-        val am = audioManager ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build()
-            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(attrs)
-                .build()
-            am.requestAudioFocus(req)
-        } else {
-            @Suppress("DEPRECATION")
-            am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
-        }
-    }
-
-    private fun abandonAudioFocus() {
-        // فوکوس رو رها می‌کنیم؛ نیازی به نگه‌داشتن رفرنس درخواست نیست چون سیستم خودش موقع تغییر فوکوس صدا می‌زنه
     }
 
     private fun createNotificationChannel() {
