@@ -11,6 +11,9 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- برای نمایش نوتیفیکیشن در اندروید ۱۳ به بالا -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- برای اینکه پخش موزیک با نوتیفیکیشن قابل‌کنترل باشه و حتی با رفتن اپ به پس‌زمینه قطع نشه -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:allowBackup="true"
@@ -50,6 +53,12 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- سرویسِ فورگراندی که نوتیفیکیشنِ پخشِ موزیک (پلی/پاز/قبلی/بعدی) رو نگه می‌داره -->
+        <service
+            android:name=".MediaPlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"

@@ -23,14 +23,16 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.google.firebase.messaging.FirebaseMessaging
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
 // آدرس سایت دهات - این رو با دامنه واقعی خودت عوض کن
-private const val SITE_URL = "https://dehaat.aghey.workers.dev"
-private const val SITE_HOST = "dehaat.aghey.workers.dev"
+private const val SITE_URL = "https://YOUR-SITE-URL.example"
+private const val SITE_HOST = "YOUR-SITE-URL.example"
 
 class MainActivity : AppCompatActivity() {
 
@@ -83,6 +85,8 @@ class MainActivity : AppCompatActivity() {
 
         hideSystemBars()
         setupWebView()
+        injectMediaSessionPolyfill()
+        setupMediaBridge()
         webView.loadUrl(SITE_URL)
 
         setupPushNotifications()
@@ -154,7 +158,102 @@ class MainActivity : AppCompatActivity() {
         webView.evaluateJavascript(js, null)
     }
 
-    private fun hideSystemBars() {
+    // پلی‌فیلِ navigator.mediaSession: خودِ WebView اندروید از Media Session وب پشتیبانی نمی‌کنه،
+    // پس بدون این کار هرچی سایت با navigator.mediaSession.metadata/playbackState/setActionHandler
+    // تنظیم می‌کنه بی‌صدا نادیده گرفته می‌شه. این اسکریپت رو *قبل از هر اسکریپت دیگه‌ی صفحه* (document start)
+    // تزریق می‌کنیم، چون سایت همون لحظه‌ی لود صفحه initMediaSessionHandlers() رو صدا می‌زنه.
+    private fun injectMediaSessionPolyfill() {
+        val script = """
+            (function() {
+                if (window.__dehaatMediaSessionPolyfilled) return;
+                window.__dehaatMediaSessionPolyfilled = true;
+                if ('mediaSession' in navigator) return;
+
+                if (typeof window.MediaMetadata === 'undefined') {
+                    window.MediaMetadata = function(init) {
+                        init = init || {};
+                        this.title = init.title || '';
+                        this.artist = init.artist || '';
+                        this.album = init.album || '';
+                        this.artwork = init.artwork || [];
+                    };
+                }
+
+                var actionHandlers = {};
+                var currentMetadata = null;
+                var currentPlaybackState = 'none';
+
+                var polyfill = {
+                    get metadata() { return currentMetadata; },
+                    set metadata(m) {
+                        currentMetadata = m;
+                        try {
+                            var art = (m && m.artwork && m.artwork.length) ? m.artwork[m.artwork.length - 1].src : '';
+                            AndroidMediaBridge.setMetadata((m && m.title) || '', (m && m.artist) || '', art || '');
+                        } catch (e) {}
+                    },
+                    get playbackState() { return currentPlaybackState; },
+                    set playbackState(s) {
+                        currentPlaybackState = s;
+                        try { AndroidMediaBridge.setPlaybackState(s === 'playing'); } catch (e) {}
+                    },
+                    setActionHandler: function(action, handler) {
+                        actionHandlers[action] = handler;
+                    },
+                    setPositionState: function(state) {
+                        try {
+                            AndroidMediaBridge.setPositionState(
+                                Math.round(((state && state.duration) || 0) * 1000),
+                                Math.round(((state && state.position) || 0) * 1000)
+                            );
+                        } catch (e) {}
+                    }
+                };
+
+                Object.defineProperty(navigator, 'mediaSession', {
+                    value: polyfill, writable: false, configurable: true
+                });
+
+                // این تابع رو کاتلین صدا می‌زنه وقتی کاربر روی دکمه‌های نوتیفیکیشن/گوشی بزنه
+                window.__dehaatInvokeMediaAction = function(action, seekMs) {
+                    var handler = actionHandlers[action];
+                    if (!handler) return;
+                    try {
+                        if (action === 'seekto') { handler({ seekTime: (seekMs || 0) / 1000, fastSeek: false }); }
+                        else { handler({}); }
+                    } catch (e) {}
+                };
+            })();
+        """.trimIndent()
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+        } else {
+            // فال‌بک برای WebViewهای خیلی قدیمی: تزریق دیرتر بهتر از هیچیه، هرچند initMediaSessionHandlers
+            // ممکنه قبلش اجرا شده باشه و بی‌اثر بمونه
+            webView.evaluateJavascript(script, null)
+        }
+    }
+
+    // کنترل‌های نوتیفیکیشن/دکمه‌های گوشی (پلی/پاز/قبلی/بعدی) از سرویس موزیک به اینجا می‌رسن
+    // و از همینجا به جاوااسکریپت خودِ سایت (همون action handlerهایی که با navigator.mediaSession
+    // ثبت کرده) پاس داده می‌شن.
+    private fun setupMediaBridge() {
+        webView.addJavascriptInterface(MediaBridge(this), "AndroidMediaBridge")
+
+        MediaPlaybackService.actionListener = { action ->
+            runOnUiThread {
+                if (action.startsWith("seekto:")) {
+                    val ms = action.substringAfter(":").toLongOrNull() ?: 0
+                    webView.evaluateJavascript("window.__dehaatInvokeMediaAction && window.__dehaatInvokeMediaAction('seekto', $ms);", null)
+                } else {
+                    webView.evaluateJavascript("window.__dehaatInvokeMediaAction && window.__dehaatInvokeMediaAction('$action');", null)
+                }
+            }
+        }
+    }
+
+
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior =
@@ -344,8 +443,58 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         FcmTokenHolder.clearListener()
+        MediaPlaybackService.actionListener = null
         webView.destroy()
         super.onDestroy()
+    }
+}
+
+// بریج جاوااسکریپت که navigator.mediaSession پلی‌فیل‌شده رو به سرویسِ پخشِ موزیک (نوتیفیکیشن واقعیِ اندروید) وصل می‌کنه
+class MediaBridge(private val context: Context) {
+
+    @JavascriptInterface
+    fun setMetadata(title: String, artist: String, artworkUrl: String) {
+        val intent = Intent(context, MediaPlaybackService::class.java).apply {
+            action = MediaPlaybackService.ACTION_UPDATE_METADATA
+            putExtra(MediaPlaybackService.EXTRA_TITLE, title)
+            putExtra(MediaPlaybackService.EXTRA_ARTIST, artist)
+            putExtra(MediaPlaybackService.EXTRA_ARTWORK_URL, artworkUrl)
+        }
+        startMediaService(intent)
+    }
+
+    @JavascriptInterface
+    fun setPlaybackState(isPlaying: Boolean) {
+        val intent = Intent(context, MediaPlaybackService::class.java).apply {
+            action = MediaPlaybackService.ACTION_UPDATE_PLAYBACK_STATE
+            putExtra(MediaPlaybackService.EXTRA_IS_PLAYING, isPlaying)
+        }
+        startMediaService(intent)
+    }
+
+    @JavascriptInterface
+    fun setPositionState(durationMs: Long, positionMs: Long) {
+        val intent = Intent(context, MediaPlaybackService::class.java).apply {
+            action = MediaPlaybackService.ACTION_UPDATE_PLAYBACK_STATE
+            // موقعیت رو هم با همون پیام وضعیتِ پخش می‌فرستیم؛ isPlaying رو عمداً ست نمی‌کنیم
+            // چون آخرین مقدارش توی خودِ سرویس نگه داشته می‌شه و اینجا فقط موقعیت/مدت رو به‌روز می‌کنیم
+            putExtra(MediaPlaybackService.EXTRA_DURATION, durationMs)
+            putExtra(MediaPlaybackService.EXTRA_POSITION, positionMs)
+            putExtra("position_only", true)
+        }
+        startMediaService(intent)
+    }
+
+    private fun startMediaService(intent: Intent) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.w("DehaatKiosk", "cannot start media service", e)
+        }
     }
 }
 
