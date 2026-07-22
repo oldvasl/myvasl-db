@@ -9,8 +9,8 @@
 با دامنه‌ی واقعی سایت دهات عوض کن:
 
 ```kotlin
-private const val SITE_URL = "https://YOUR-SITE-URL.example"
-private const val SITE_HOST = "YOUR-SITE-URL.example"
+private const val SITE_URL = "https://dehaat.aghey.workers.dev"
+private const val SITE_HOST = "dehaat.aghey.workers.dev"
 ```
 
 ## قابلیت‌ها

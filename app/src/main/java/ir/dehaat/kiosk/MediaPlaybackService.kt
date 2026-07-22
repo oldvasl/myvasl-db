@@ -116,7 +116,6 @@ class MediaPlaybackService : Service() {
                 }
             }
             ACTION_STOP -> {
-                abandonAudioFocus()
                 mediaSession.isActive = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
