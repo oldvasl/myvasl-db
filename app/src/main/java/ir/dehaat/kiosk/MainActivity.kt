@@ -23,6 +23,7 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.firebase.messaging.FirebaseMessaging
@@ -303,6 +304,28 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             userAgentString = userAgentString + " DehaatKioskApp/1.0"
+        }
+
+        // پیش‌رندر کردن محتوای خارج از دید (مثلاً تب‌هایی که فعلاً دیده نمی‌شن ولی توی DOM هستن)؛
+        // بدون این، وقتی کاربر تب رو عوض می‌کنه، WebView تازه شروع به رندر کردن محتوای اون تب
+        // می‌کنه و همین باعث لگ/تاخیر لحظه‌ی سوییچ می‌شه.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.OFF_SCREEN_PRERASTER)) {
+            WebSettingsCompat.setOffscreenPreRaster(webView.settings, true)
+        }
+
+        // چون این اپ کیوسکِ تک‌منظوره‌س (فقط همین وب‌ویو نمایش داده می‌شه)، پروسسِ رندرر رو
+        // همیشه با اولویت بالا نگه می‌داریم تا سیستم موقع سوییچ تب/اسکرول throttleش نکنه
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+        }
+
+        // WebView به‌طور پیش‌فرض کوکی‌های third-party (مثلاً از یه CDN یا هاست دیگه که تامبنیل/ویدیو
+        // ازش سرو می‌شه) رو قبول نمی‌کنه، برخلاف مرورگر معمولی؛ همین می‌تونه باعث بشه یه منبعِ
+        // کراس-اورجین (مثل فایل‌های تلگرام) که به کوکی نیاز داره، فقط داخل اپ لود نشه ولی توی خودِ
+        // سایت (مرورگر) درست کار کنه.
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
         }
 
         // برای دانلودهای بلاب (فایل‌هایی که با جاوااسکریپت ساخته می‌شن)
