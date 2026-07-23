@@ -14,6 +14,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
+import android.view.View
 import android.webkit.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -104,6 +105,10 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         webView = WebView(this)
+        // به‌صورتِ صریح یه لایه‌ی سخت‌افزاریِ GPU برایِ کلِ WebView می‌سازیم؛ به‌جایِ تکیه به رفتارِ
+        // پیش‌فرضِ سیستم. این دقیقاً همون چیزیه که خیلی وقت‌ها فرقِ روانیِ WebViewِ داخلِ اپ رو با
+        // کرومِ مستقلِ گوشی کم می‌کنه، بدونِ اینکه هیچ افکت/انیمیشنی حذف بشه.
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         setContentView(webView)
 
         hideSystemBars()
