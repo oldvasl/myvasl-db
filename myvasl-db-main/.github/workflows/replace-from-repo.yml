@@ -1,0 +1,107 @@
+name: Replace Repo From Zip
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_name:
+        description: 'اسم دقیق فایل زیپ (مثلاً DehaatKiosk.zip)'
+        required: false
+        default: 'DehaatKiosk.zip'
+        type: string
+  push:
+    paths:
+      - '**/*.zip'
+
+permissions:
+  contents: write
+
+jobs:
+  replace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Debug - list repo root
+        run: |
+          echo "برنچ فعلی:"
+          git branch --show-current
+          echo "---"
+          echo "محتوای ریشه‌ی مخزن:"
+          ls -la
+          echo "---"
+          echo "جستجوی هر فایل zip توی کل مخزن:"
+          find . -iname "*.zip" -not -path "./.git/*"
+
+      - name: Find the zip file
+        id: findzip
+        env:
+          ZIP_NAME_INPUT: ${{ github.event.inputs.zip_name }}
+        run: |
+          # اگه از طریق دکمه‌ی دستی اسم داده شده، از همون استفاده کن
+          # وگرنه (اجرای خودکار با پوش) دنبال هر zip توی مخزن بگرد
+          if [ -n "$ZIP_NAME_INPUT" ]; then
+            ZIP_PATH=$(find . -iname "$ZIP_NAME_INPUT" -not -path "./.git/*" | head -n 1)
+          else
+            ZIP_PATH=$(find . -iname "*.zip" -not -path "./.git/*" | head -n 1)
+          fi
+
+          if [ -z "$ZIP_PATH" ]; then
+            echo "هیچ فایل zip مطابق پیدا نشد. لیست بالا رو ببین که فایل واقعاً کجاست و اسمش دقیقاً چیه."
+            exit 1
+          fi
+          echo "زیپ پیدا شد در: $ZIP_PATH"
+          echo "ZIP_PATH=$ZIP_PATH" >> $GITHUB_ENV
+
+      - name: Extract zip
+        run: |
+          rm -rf _extracted
+          mkdir _extracted
+          unzip -o "$ZIP_PATH" -d _extracted
+
+          TOP_ITEMS=$(find _extracted -mindepth 1 -maxdepth 1 | wc -l)
+          if [ "$TOP_ITEMS" -eq 1 ] && [ -d "$(find _extracted -mindepth 1 -maxdepth 1)" ]; then
+            SRC_DIR=$(find _extracted -mindepth 1 -maxdepth 1)
+          else
+            SRC_DIR="_extracted"
+          fi
+          echo "SRC_DIR=$SRC_DIR" >> $GITHUB_ENV
+
+      - name: Backup current .github/workflows
+        run: |
+          mkdir -p /tmp/workflows-backup
+          if [ -d ".github/workflows" ]; then
+            cp -r .github/workflows/. /tmp/workflows-backup/
+          fi
+
+      - name: Wipe repo content (به‌جز .git)
+        run: |
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name '.git' \
+            ! -name '_extracted' \
+            -exec rm -rf {} +
+
+      - name: Copy new content in place
+        run: |
+          cp -r "$SRC_DIR"/. .
+          rm -rf _extracted
+
+      - name: Restore original .github/workflows
+        run: |
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp -r /tmp/workflows-backup/. .github/workflows/
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "تغییری برای commit نبود."
+          else
+            git commit -m "Replace repo content from zip"
+            git push
+          fi

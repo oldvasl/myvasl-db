@@ -28,7 +28,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -74,9 +73,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var downloadBubble: DownloadProgressView
 
-    // برای آپلود فایل (input type=file توی سایت)
+    // برای آپلود فایل (input type=file توی سایت) — فقط انتخاب از گالری/فایل‌منیجر، بدون دوربین
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private var cameraImageUri: Uri? = null
 
     // برای پوش نوتیفیکیشن
     private var pendingFcmToken: String? = null
@@ -115,7 +113,6 @@ class MainActivity : AppCompatActivity() {
                     val clip = data.clipData!!
                     Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
                 }
-                cameraImageUri != null -> arrayOf(cameraImageUri!!)
                 else -> null
             }
             callback.onReceiveValue(results)
@@ -460,32 +457,30 @@ class MainActivity : AppCompatActivity() {
                 this@MainActivity.filePathCallback?.onReceiveValue(null)
                 this@MainActivity.filePathCallback = filePathCallbackParam
 
-                val acceptTypes = fileChooserParams.acceptTypes
-                val mimeType =
-                    if (acceptTypes.isNotEmpty() && acceptTypes[0].isNotBlank()) acceptTypes[0] else "*/*"
+                // acceptTypes می‌تونه چند مقدار داشته باشه (مثلاً input سایت accept="image/*,video/*"
+                // داشته باشه)، پس همه‌شون رو در نظر می‌گیریم نه فقط اولی رو
+                val rawAcceptTypes = fileChooserParams.acceptTypes.filter { it.isNotBlank() }
 
+                // اگه چندتا mimeType متفاوت مجازن (مثلاً هم عکس هم ویدیو)، نمی‌شه با یه type
+                // ساده‌ی ACTION_GET_CONTENT هر دو رو هم‌زمان پوشش داد؛ باید type رو "*/*" بذاریم
+                // و لیستِ دقیقِ mimeTypeها رو با EXTRA_MIME_TYPES مشخص کنیم
                 val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = mimeType
                     addCategory(Intent.CATEGORY_OPENABLE)
+                    if (rawAcceptTypes.size > 1) {
+                        type = "*/*"
+                        putExtra(Intent.EXTRA_MIME_TYPES, rawAcceptTypes.toTypedArray())
+                    } else {
+                        type = rawAcceptTypes.firstOrNull()?.takeIf { it.isNotBlank() } ?: "*/*"
+                    }
                     putExtra(
                         Intent.EXTRA_ALLOW_MULTIPLE,
                         fileChooserParams.mode == FileChooserParams.MODE_OPEN_MULTIPLE
                     )
                 }
 
-                var cameraIntent: Intent? = null
-                if (mimeType.startsWith("image/") || mimeType == "*/*") {
-                    cameraImageUri = createImageUri()
-                    cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                        putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri)
-                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                    }
-                }
-
+                // عمداً هیچ میان‌بر دوربینی (نه عکس نه ویدیو) به چوزر اضافه نمی‌شه؛
+                // فقط انتخاب از گالری/فایل‌منیجر مجازه
                 val chooserIntent = Intent.createChooser(contentIntent, "انتخاب فایل")
-                if (cameraIntent != null) {
-                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent))
-                }
 
                 return try {
                     fileChooserLauncher.launch(chooserIntent)
@@ -501,12 +496,6 @@ class MainActivity : AppCompatActivity() {
         webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
             downloadRegularFile(url, contentDisposition, mimeType)
         }
-    }
-
-    private fun createImageUri(): Uri {
-        val imagesDir = File(cacheDir, "images").apply { mkdirs() }
-        val file = File(imagesDir, "capture_${System.currentTimeMillis()}.jpg")
-        return FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
     }
 
     private fun downloadRegularFile(url: String, contentDisposition: String?, mimeType: String?) {

@@ -6,10 +6,7 @@
     <!-- فقط برای اندروید ۹ و پایین‌تر لازمه، اندروید ۱۰+ نیازی نداره -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
-    <!-- برای آپلود عکس با دوربین (آواتار/پست) -->
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <!-- برای نمایش نوتیفیکیشن در اندروید ۱۳ به بالا -->
+    <!-- نمایش نوتیفیکیشن در اندروید ۱۳ به بالا -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- برای اینکه پخش موزیک با نوتیفیکیشن قابل‌کنترل باشه و حتی با رفتن اپ به پس‌زمینه قطع نشه -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -35,17 +32,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- برای اینکه دوربین بتونه عکس رو به اپ برگردونه (آپلود فایل) -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
 
         <!-- سرویس دریافت پوش نوتیفیکیشن -->
         <service
