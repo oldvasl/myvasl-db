@@ -1,9 +1,11 @@
 package ir.dehaat.kiosk
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,11 +13,17 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
+import android.view.Gravity
 import android.view.View
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.webkit.*
+import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -46,9 +54,25 @@ private val downloadFileExtensions = setOf(
     "mp3", "mp4", "mov", "avi", "mkv", "wav"
 )
 
+// زیرپوشه‌ی مناسبِ Download/dehaat/... رو بر اساسِ نوعِ فایل تشخیص می‌ده
+private val videoExtensions = setOf("mp4", "mov", "avi", "mkv", "webm", "3gp", "m4v")
+private val imageExtensions = setOf("png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "heic")
+private val audioExtensions = setOf("mp3", "wav", "m4a", "aac", "ogg", "flac", "opus")
+
+fun subfolderFor(fileName: String, mimeType: String?): String {
+    val ext = fileName.substringAfterLast('.', "").lowercase()
+    return when {
+        mimeType?.startsWith("video/") == true || ext in videoExtensions -> "videos"
+        mimeType?.startsWith("image/") == true || ext in imageExtensions -> "photos"
+        mimeType?.startsWith("audio/") == true || ext in audioExtensions -> "music"
+        else -> "other"
+    }
+}
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var downloadBubble: DownloadProgressView
 
     // برای آپلود فایل (input type=file توی سایت)
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -109,7 +133,20 @@ class MainActivity : AppCompatActivity() {
         // پیش‌فرضِ سیستم. این دقیقاً همون چیزیه که خیلی وقت‌ها فرقِ روانیِ WebViewِ داخلِ اپ رو با
         // کرومِ مستقلِ گوشی کم می‌کنه، بدونِ اینکه هیچ افکت/انیمیشنی حذف بشه.
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        setContentView(webView)
+
+        val rootLayout = FrameLayout(this)
+        rootLayout.addView(webView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+        val bubbleSize = dp(46)
+        downloadBubble = DownloadProgressView(this)
+        val bubbleParams = FrameLayout.LayoutParams(bubbleSize, bubbleSize).apply {
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        rootLayout.addView(downloadBubble, bubbleParams)
+        downloadBubble.translationX = bubbleSize.toFloat()
+        downloadBubble.visibility = View.GONE
+
+        setContentView(rootLayout)
 
         hideSystemBars()
         setupWebView()
@@ -286,6 +323,45 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    // ---------- کنترلِ حبابِ پیشرفتِ دانلود ----------
+    // internal (نه private) چون کلاسِ DownloadBridge هم توی همین فایل، به این توابع نیاز داره.
+    internal fun showDownloadBubble() {
+        runOnUiThread {
+            downloadBubble.reset()
+            downloadBubble.visibility = View.VISIBLE
+            downloadBubble.animate()
+                .translationX(0f)
+                .setDuration(280)
+                .setInterpolator(OvershootInterpolator(1.1f))
+                .start()
+        }
+    }
+
+    internal fun updateDownloadBubbleProgress(percent: Int) {
+        runOnUiThread { downloadBubble.setProgress(percent) }
+    }
+
+    internal fun completeDownloadBubble() {
+        runOnUiThread {
+            downloadBubble.showCheckmark()
+            downloadBubble.postDelayed({ hideDownloadBubble() }, 900)
+        }
+    }
+
+    internal fun hideDownloadBubble() {
+        runOnUiThread {
+            val size = downloadBubble.width.takeIf { it > 0 } ?: dp(46)
+            downloadBubble.animate()
+                .translationX(size.toFloat())
+                .setDuration(260)
+                .setInterpolator(AccelerateInterpolator())
+                .withEndAction { downloadBubble.visibility = View.GONE }
+                .start()
+        }
+    }
+
     private fun hideSystemBars() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -452,19 +528,68 @@ class MainActivity : AppCompatActivity() {
     private fun startRegularFileDownload(url: String, contentDisposition: String?, mimeType: String?) {
         try {
             val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            val subfolder = subfolderFor(fileName, mimeType)
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 setMimeType(mimeType)
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "dehaat/$subfolder/$fileName")
                 setTitle(fileName)
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
             }
             val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(request)
+            val downloadId = dm.enqueue(request)
+            showDownloadBubble()
+            trackDownloadProgress(dm, downloadId)
         } catch (e: Exception) {
             Log.e("DehaatKiosk", "download failed", e)
         }
+    }
+
+    // هر ۳۰۰ میلی‌ثانیه از DownloadManager می‌پرسه چقدر پیش رفته، تا وقتی که تموم یا ناموفق بشه.
+    // خودِ کوئری رو تو یه ترد جدا می‌زنیم که به ترد اصلی/UI فشار نیاره.
+    private fun trackDownloadProgress(dm: DownloadManager, downloadId: Long) {
+        val handler = Handler(Looper.getMainLooper())
+        val query = DownloadManager.Query().setFilterById(downloadId)
+
+        val poll = object : Runnable {
+            override fun run() {
+                Thread {
+                    var percent = -1
+                    var finished = false
+                    var success = false
+                    try {
+                        dm.query(query)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                                val soFarIdx = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                                val totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                                val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
+                                val soFar = if (soFarIdx >= 0) cursor.getLong(soFarIdx) else 0L
+                                val total = if (totalIdx >= 0) cursor.getLong(totalIdx) else -1L
+                                if (total > 0) percent = ((soFar * 100) / total).toInt()
+                                when (status) {
+                                    DownloadManager.STATUS_SUCCESSFUL -> { finished = true; success = true }
+                                    DownloadManager.STATUS_FAILED -> { finished = true; success = false }
+                                }
+                            } else {
+                                finished = true; success = false
+                            }
+                        }
+                    } catch (e: Exception) {
+                        finished = true; success = false
+                    }
+
+                    if (percent >= 0) updateDownloadBubbleProgress(percent)
+                    if (finished) {
+                        if (success) completeDownloadBubble() else hideDownloadBubble()
+                    } else {
+                        handler.postDelayed(this, 300)
+                    }
+                }.start()
+            }
+        }
+        handler.post(poll)
     }
 
     // اسکریپتی که دانلودهای blob رو (چه با <a download> چه window.open) می‌گیره و از طریق بریج به کاتلین می‌فرسته
@@ -580,34 +705,70 @@ class MediaBridge(private val context: Context) {
 }
 
 // بریج جاوااسکریپت برای ذخیره فایل‌های بلاب (بیس۶۴)
-class DownloadBridge(private val context: Context) {
+class DownloadBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun saveBase64File(base64Data: String, fileName: String, mimeType: String) {
+        activity.showDownloadBubble()
         try {
             val bytes = Base64.decode(base64Data, Base64.DEFAULT)
-            val downloadsDir =
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            val subfolder = subfolderFor(fileName, mimeType)
 
-            var file = File(downloadsDir, fileName)
-            var counter = 1
-            val baseName = fileName.substringBeforeLast('.', fileName)
-            val ext = fileName.substringAfterLast('.', "")
-            while (file.exists()) {
-                val newName = if (ext.isNotEmpty()) "$baseName($counter).$ext" else "$baseName($counter)"
-                file = File(downloadsDir, newName)
-                counter++
+            // این داده از قبل رو حافظه‌ست (نه یه دانلودِ شبکه‌ای واقعی)، پس پیشرفتِ واقعی معنی نداره؛
+            // فقط برای یکدست‌بودنِ تجربه‌ی بصری با دانلودهای معمولی، یه پرشِ نرم به ۳۵٪ نشون می‌دیم
+            activity.updateDownloadBubbleProgress(35)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saveViaMediaStore(bytes, fileName, mimeType, subfolder)
+            } else {
+                saveViaLegacyFile(bytes, fileName, subfolder)
             }
 
-            FileOutputStream(file).use { it.write(bytes) }
-
-            val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-            intent.data = Uri.fromFile(file)
-            context.sendBroadcast(intent)
-
+            activity.updateDownloadBubbleProgress(100)
+            activity.completeDownloadBubble()
         } catch (e: Exception) {
             Log.e("DehaatKiosk", "saveBase64File failed", e)
+            activity.hideDownloadBubble()
         }
+    }
+
+    // اندروید ۱۰+ (Scoped Storage): باید از طریق MediaStore بنویسیم، نوشتنِ مستقیمِ File دیگه کار نمی‌کنه
+    private fun saveViaMediaStore(bytes: ByteArray, fileName: String, mimeType: String, subfolder: String) {
+        val resolver = activity.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, mimeType.ifBlank { "application/octet-stream" })
+            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/dehaat/$subfolder")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val itemUri = resolver.insert(collection, values) ?: throw Exception("MediaStore insert failed")
+        resolver.openOutputStream(itemUri)?.use { it.write(bytes) }
+            ?: throw Exception("openOutputStream failed")
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(itemUri, values, null, null)
+    }
+
+    // اندروید ۹ و پایین‌تر: نوشتنِ مستقیمِ فایل هنوز جواب می‌ده
+    private fun saveViaLegacyFile(bytes: ByteArray, fileName: String, subfolder: String) {
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val targetDir = File(downloadsDir, "dehaat/$subfolder").apply { mkdirs() }
+
+        var file = File(targetDir, fileName)
+        var counter = 1
+        val baseName = fileName.substringBeforeLast('.', fileName)
+        val ext = fileName.substringAfterLast('.', "")
+        while (file.exists()) {
+            val newName = if (ext.isNotEmpty()) "$baseName($counter).$ext" else "$baseName($counter)"
+            file = File(targetDir, newName)
+            counter++
+        }
+
+        FileOutputStream(file).use { it.write(bytes) }
+
+        val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+        intent.data = Uri.fromFile(file)
+        activity.sendBroadcast(intent)
     }
 }
