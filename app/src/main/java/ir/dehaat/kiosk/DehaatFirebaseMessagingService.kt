@@ -1,11 +1,14 @@
 package ir.dehaat.kiosk
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -41,6 +44,15 @@ class DehaatFirebaseMessagingService : FirebaseMessagingService() {
             manager.createNotificationChannel(channel)
         }
 
+        // اندروید ۱۳+ بدونِ پرمیشنِ POST_NOTIFICATIONS اجازه‌ی notify() نمی‌ده و با
+        // SecurityException کرش می‌کنه؛ این چکِ صریح جلوی اون کرش رو می‌گیره
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (!link.isNullOrEmpty()) putExtra("open_url", link)
@@ -61,7 +73,13 @@ class DehaatFirebaseMessagingService : FirebaseMessagingService() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
-        manager.notify(System.currentTimeMillis().toInt(), notification)
+        try {
+            manager.notify(System.currentTimeMillis().toInt(), notification)
+        } catch (e: SecurityException) {
+            // بعضی گوشی‌ها (خصوصاً برخی OEM ها) حتی بعدِ گرنت‌شدنِ پرمیشن هم لحظه‌ای
+            // استثنا می‌ندازن؛ به‌جای کرش کردنِ کلِ اپ فقط لاگ می‌کنیم
+            android.util.Log.w("DehaatKiosk", "notify() denied despite permission check", e)
+        }
     }
 }
 

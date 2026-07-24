@@ -250,7 +250,15 @@ class MediaPlaybackService : Service() {
         // همیشه به‌عنوان فورگراند سرویس نمایش داده می‌شه (چه در حال پخش، چه مکث)؛ این‌جوری هم
         // محدودیتِ ۵ثانیه‌ایِ اندروید ۱۲+ برای startForegroundService نقض نمی‌شه، هم کاربر همیشه
         // می‌تونه از همون نوتیف دوباره پلی بزنه. فقط با ACTION_STOP کامل جمع می‌شه.
-        startForeground(NOTIFICATION_ID, notification)
+        // اندروید ۱۳+ بدونِ پرمیشنِ POST_NOTIFICATIONS اجازه‌ی notify() نمی‌ده. برای فورگراند
+        // سرویس باز هم باید startForeground صدا زده بشه (وگرنه اندروید کلِ سرویس رو کرش/کیل
+        // می‌کنه)، فقط با try/catch جلوی کرش رو می‌گیریم تا اگه پرمیشن نبود، فقط سرویس بدونِ
+        // نوتیفِ قابل‌مشاهده (که سیستم به‌صورت خاموش نادیده می‌گیره) ادامه بده، نه کلِ اپ کرش کنه
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: SecurityException) {
+            android.util.Log.w("DehaatKiosk", "startForeground denied (no notification permission)", e)
+        }
         hasPostedInitialNotification = true
     }
 

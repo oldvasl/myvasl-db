@@ -126,6 +126,10 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         webView = WebView(this)
+        // پیش‌فرض خودِ WebView پس‌زمینه‌ش سفیده و تا وقتی محتوای سایت/CSS رندر بشه همون سفید
+        // دیده می‌شه، حتی اگه windowBackground تمِ اپ مشکی باشه. برای جلوگیری از فلشِ سفید
+        // موقعِ لانچ/لودِ صفحه، صریحاً پس‌زمینه‌ی خودِ WebView رو مشکی می‌کنیم
+        webView.setBackgroundColor(android.graphics.Color.BLACK)
         // به‌صورتِ صریح یه لایه‌ی سخت‌افزاریِ GPU برایِ کلِ WebView می‌سازیم؛ به‌جایِ تکیه به رفتارِ
         // پیش‌فرضِ سیستم. این دقیقاً همون چیزیه که خیلی وقت‌ها فرقِ روانیِ WebViewِ داخلِ اپ رو با
         // کرومِ مستقلِ گوشی کم می‌کنه، بدونِ اینکه هیچ افکت/انیمیشنی حذف بشه.
