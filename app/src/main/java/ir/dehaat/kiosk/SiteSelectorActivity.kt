@@ -82,7 +82,10 @@ class SiteSelectorActivity : AppCompatActivity() {
         }
         root.addView(
             content,
-            ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT)
+            android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
         )
 
         val title = TextView(this).apply {
