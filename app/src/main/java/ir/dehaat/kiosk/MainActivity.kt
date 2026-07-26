@@ -39,12 +39,28 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
-// آدرس سایت دهات - این رو با دامنه واقعی خودت عوض کن
-private const val SITE_URL = "https://dehaat.faggott.fun"
-private const val SITE_HOST = "dehaat.faggott.fun"
+// دو آدرسِ فعلیِ سایتِ دهات (دو دامنه‌ی جدا که همون سایت رو سرو می‌کنن)
+const val SITE_URL_FAGGOT = "https://dehaat.faggott.fun"
+const val SITE_URL_WORKERS = "https://dehaat.aghey.workers.dev"
+
+// دامنه‌ای که اگه هیچ انتخاب/پیش‌فرضی در کار نبود استفاده می‌شه (مثلاً وقتی از نوتیف مستقیم باز می‌شه)
+private const val DEFAULT_SITE_URL = SITE_URL_FAGGOT
+
+// هاست‌هایی که «همون سایت» حساب می‌شن و باید داخل وب‌ویو لود بشن، نه با یه اپ خارجی
+private val SITE_HOSTS = setOf(
+    Uri.parse(SITE_URL_FAGGOT).host,
+    Uri.parse(SITE_URL_WORKERS).host
+).filterNotNull().toSet()
+
+// کلید اینتنت‌اکسترا که SiteSelectorActivity باهاش آدرسِ انتخاب‌شده رو پاس می‌ده
+const val EXTRA_SITE_URL = "extra_site_url"
+
+// SharedPreferences‌ای که آدرسِ پیش‌فرضِ لانچ (اگه کاربر تیکِ «پیش‌فرض کن» رو زده باشه) توش ذخیره می‌شه
+const val SITE_PREFS_NAME = "dehaat_kiosk_prefs"
+const val PREF_KEY_DEFAULT_SITE = "default_site_url"
 
 // پسوند فایل‌هایی که تقریباً همیشه یعنی «این یه دانلوده، نه لینک به یه اپ دیگه»؛
-// حتی اگه از یه هاست/CDN دیگه (غیر از SITE_HOST) سرو بشن، بازم باید داخل وب‌ویو دست‌کاری بشن
+// حتی اگه از یه هاست/CDN دیگه (غیر از دامنه‌های سایت) سرو بشن، بازم باید داخل وب‌ویو دست‌کاری بشن
 // تا setDownloadListener بگیرتشون، نه اینکه با ACTION_VIEW به یه اپ خارجی پاس داده بشن
 private val downloadFileExtensions = setOf(
     "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "txt",
@@ -153,7 +169,7 @@ class MainActivity : AppCompatActivity() {
         setupWebView()
         injectMediaSessionPolyfill()
         setupMediaBridge()
-        webView.loadUrl(SITE_URL)
+        webView.loadUrl(resolveInitialUrl())
 
         setupPushNotifications()
         handleNotificationIntent(intent)
@@ -174,6 +190,17 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+    }
+
+    // آدرسی که باید موقع لانچ لود بشه رو به این ترتیب تعیین می‌کنه:
+    // ۱) اگه SiteSelectorActivity یه آدرس مشخص پاس داده (EXTRA_SITE_URL) همون
+    // ۲) وگرنه اگه قبلاً یه پیش‌فرض ذخیره شده (چک‌باکسِ صفحه‌ی انتخاب)، همون
+    // ۳) وگرنه دامنه‌ی پیش‌فرضِ کد (برای حالتی که مستقیم از نوتیف/بیرون باز شده و از صفحه‌ی انتخاب رد نشده)
+    private fun resolveInitialUrl(): String {
+        intent?.getStringExtra(EXTRA_SITE_URL)?.let { return it }
+        val savedDefault = getSharedPreferences(SITE_PREFS_NAME, MODE_PRIVATE)
+            .getString(PREF_KEY_DEFAULT_SITE, null)
+        return savedDefault ?: DEFAULT_SITE_URL
     }
 
     // وقتی کاربر روی نوتیف می‌زنه، اگه لینک خاصی همراهش اومده باشه همون رو باز می‌کنیم
@@ -422,7 +449,7 @@ class MainActivity : AppCompatActivity() {
                 val host = url.host ?: ""
                 // ساب‌دامین‌های همون سایت (مثل cdn.example.com یا files.example.com) هم مجازن،
                 // چون خیلی از سایت‌ها فایل‌های دانلودی رو از یه ساب‌دامین جدا سرو می‌کنن، نه از دامنه‌ی اصلی
-                val isSameSite = host == SITE_HOST || host.endsWith(".$SITE_HOST")
+                val isSameSite = SITE_HOSTS.any { site -> host == site || host.endsWith(".$site") }
                 // اگه لینک به یه پسوند فایل دانلودی معمول ختم بشه، صرف‌نظر از هاست بذار خودِ وب‌ویو
                 // امتحانش کنه (و از طریق setDownloadListener بگیرتش)، چون تقریباً مطمئنیم لینک به
                 // یه اپ دیگه (مثل تلگرام) مربوط نیست و باید دانلود بشه

@@ -21,10 +21,10 @@
         android:theme="@style/Theme.DehaatKiosk"
         android:usesCleartextTraffic="false">
 
+        <!-- صفحه‌ی اول: انتخاب بین دو آدرسِ سایت (یا رفتنِ مستقیم به پیش‌فرضِ ذخیره‌شده) -->
         <activity
-            android:name=".MainActivity"
+            android:name=".SiteSelectorActivity"
             android:exported="true"
-            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.DehaatKiosk">
             <intent-filter>
@@ -32,6 +32,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/Theme.DehaatKiosk" />
 
         <!-- سرویس دریافت پوش نوتیفیکیشن -->
         <service
